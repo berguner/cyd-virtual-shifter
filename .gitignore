@@ -1,0 +1,7 @@
+# PlatformIO build output and downloaded dependencies
+.pio/
+
+# Editor and OS noise
+.vscode/
+.DS_Store
+*.swp
