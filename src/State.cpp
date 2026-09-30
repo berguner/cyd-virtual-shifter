@@ -48,6 +48,7 @@ struct ProfileSpec {
 constexpr ProfileSpec kProfileSpecs[kProfileFieldCount] = {
     {0.5f, 30.0f, 200.0f},     // rider, kg
     {0.1f, 3.0f, 30.0f},       // bike, kg
+    {1.0f, 50.0f, 600.0f},     // FTP, W
     {1.0f, 1500.0f, 2500.0f},  // wheel circumference, mm
     {1.0f, 120.0f, 220.0f},    // rider height, cm
 };
@@ -56,10 +57,25 @@ float& profileSetting(Settings& settings, ProfileField field) {
   switch (field) {
     case ProfileField::RiderKg: return settings.riderKg;
     case ProfileField::BikeKg: return settings.bikeKg;
+    case ProfileField::FtpW: return settings.ftpW;
     case ProfileField::WheelMm: return settings.wheelMm;
     default: return settings.riderCm;
   }
 }
+
+// Power is sampled four times a second into a 3 s window, and the window's
+// average is recorded once a second. The value held between two trainer
+// notifications counts for as long as it was held, which is what a 3 s power
+// figure means.
+constexpr uint32_t kPowerSampleMs = 250;
+constexpr int kPowerWindow = 12;
+uint16_t s_powerWindow[kPowerWindow] = {0};
+int s_powerWindowNext = 0;
+uint16_t s_powerHistory[kPowerHistoryLen] = {0};
+int s_powerHistoryNewest = kPowerHistoryLen - 1;
+uint32_t s_powerHistorySeq = 0;
+uint32_t s_lastPowerSampleMs = 0;
+int s_samplesSinceRecord = 0;
 
 // Snapped to the step, so repeated 0.1 kg steps do not drift to 8.299999.
 float clampToSpec(float value, const ProfileSpec& spec) {
@@ -88,6 +104,7 @@ void Settings::load() {
   bikeKg      = loadFloat(prefs, "bikeKg", kDefaultBikeKg);
   wheelMm     = loadFloat(prefs, "wheelMm", kDefaultWheelMm);
   riderCm     = loadFloat(prefs, "riderCm", kDefaultRiderCm);
+  ftpW        = loadFloat(prefs, "ftpW", kDefaultFtpW);
   upChannel   = prefs.getInt("upCh", kDefaultUpChannel);
   downChannel = prefs.getInt("downCh", kDefaultDownChannel);
   gear        = prefs.getInt("gear", 0);
@@ -120,6 +137,7 @@ void Settings::save() {
   prefs.putFloat("bikeKg", bikeKg);
   prefs.putFloat("wheelMm", wheelMm);
   prefs.putFloat("riderCm", riderCm);
+  prefs.putFloat("ftpW", ftpW);
   prefs.putInt("upCh", upChannel);
   prefs.putInt("downCh", downChannel);
   prefs.putInt("gear", gear);
@@ -172,6 +190,33 @@ bool applyProfile(const Profile& profile) {
   }
   return changed;
 }
+
+void samplePowerHistory() {
+  const uint32_t now = millis();
+  if (s_lastPowerSampleMs != 0 && now - s_lastPowerSampleMs < kPowerSampleMs) return;
+  s_lastPowerSampleMs = now;
+
+  const int16_t watts = g_ride.power;
+  s_powerWindow[s_powerWindowNext] = (uint16_t)max<int16_t>(0, watts);
+  s_powerWindowNext = (s_powerWindowNext + 1) % kPowerWindow;
+
+  if (++s_samplesSinceRecord < 1000 / kPowerSampleMs) return;
+  s_samplesSinceRecord = 0;
+  uint32_t sum = 0;
+  for (uint16_t w : s_powerWindow) sum += w;
+  s_powerHistoryNewest = (s_powerHistoryNewest + 1) % kPowerHistoryLen;
+  s_powerHistory[s_powerHistoryNewest] = (uint16_t)(sum / kPowerWindow);
+  s_powerHistorySeq++;
+}
+
+uint16_t powerHistory(int secondsAgo) {
+  if (secondsAgo < 0 || secondsAgo >= kPowerHistoryLen) return 0;
+  if ((uint32_t)secondsAgo >= s_powerHistorySeq) return 0;
+  const int index = (s_powerHistoryNewest - secondsAgo + kPowerHistoryLen) % kPowerHistoryLen;
+  return s_powerHistory[index];
+}
+
+uint32_t powerHistorySeq() { return s_powerHistorySeq; }
 
 namespace {
 

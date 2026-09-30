@@ -503,6 +503,7 @@ void loop() {
   }
 
   expireStoppedCadence();
+  samplePowerHistory();
 
   // One line a second with everything that decides the resistance, so a ride
   // log can be lined up against how it felt.

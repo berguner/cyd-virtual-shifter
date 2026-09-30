@@ -37,23 +37,44 @@ constexpr int16_t kChipX[4] = {4, 73, 142, 211};
 constexpr int16_t kProfileButtonX = 280;
 constexpr int16_t kProfileButtonW = 36;
 
-constexpr int16_t kRightX = 176;
-constexpr int16_t kRightW = 140;
+// Shift buttons down both edges, between the header row and the graph.
+constexpr int16_t kSideButtonW = 30;
+constexpr int16_t kSideButtonTop = 28;
+constexpr int16_t kSideButtonH = 164;
+constexpr int16_t kEasierX = 2;
+constexpr int16_t kHarderX = kScreenW - 2 - kSideButtonW;
+
+// Between them: the gear on the left; power, cadence and grade on the right.
+// Both are sized to their widest text - "32" in Font 7 at double size, and
+// "1999" in Font 6.
+constexpr int16_t kLeftX = 36;
+constexpr int16_t kLeftW = 128;
+constexpr int16_t kRightX = 170;
+constexpr int16_t kRightW = 114;
 constexpr int16_t kCadenceButtonY = 98;
 constexpr int16_t kCadenceButtonH = 20;
 
 // Gear-count button, top of the left column.
-constexpr int16_t kGearCountX = 10;
+constexpr int16_t kGearCountX = kLeftX;
 constexpr int16_t kGearCountY = 28;
-constexpr int16_t kGearCountW = 150;
+constexpr int16_t kGearCountW = 104;
 constexpr int16_t kGearCountH = 20;
 
 // DEBUG button, right of the POWER label. Ends above y 46, where the power
 // figure's padding starts painting.
-constexpr int16_t kDebugButtonX = 248;
-constexpr int16_t kDebugButtonY = 27;
 constexpr int16_t kDebugButtonW = 68;
+constexpr int16_t kDebugButtonX = kRightX + kRightW - kDebugButtonW;
+constexpr int16_t kDebugButtonY = 27;
 constexpr int16_t kDebugButtonH = 18;
+
+// Power graph along the bottom: one column per second of history, height in
+// proportion to power, colour by zone.
+constexpr int16_t kGraphX = 2;
+constexpr int16_t kGraphY = 196;
+constexpr int16_t kGraphW = 316;
+constexpr int16_t kGraphH = 42;
+constexpr float kGraphTopFtp = 1.5f;  // the top edge, as a fraction of FTP
+static_assert(kGraphW == kPowerHistoryLen, "one history entry per graph column");
 
 // Debug screen: a title row holding the way back, then fixed lines of Font 2.
 constexpr int16_t kBackButtonX = 248;
@@ -67,10 +88,10 @@ constexpr int16_t kDebugRightPad = 200;
 constexpr uint32_t kDebugRefreshMs = 250;
 
 // Profile screen: one row per field - label, value, unit, then -/+.
-constexpr int16_t kProfileTop = 30;
-constexpr int16_t kProfileRowPitch = 44;
+constexpr int16_t kProfileTop = 28;
+constexpr int16_t kProfileRowPitch = 37;
 constexpr int16_t kStepButtonW = 52;
-constexpr int16_t kStepButtonH = 34;
+constexpr int16_t kStepButtonH = 32;
 constexpr int16_t kMinusX = 196;
 constexpr int16_t kPlusX = 262;
 constexpr int16_t kProfileValueRight = 164;
@@ -78,7 +99,7 @@ constexpr uint32_t kStepRepeatMs = 90;
 constexpr uint32_t kStepFastAfterMs = 2500;  // then ten steps per repeat
 constexpr int kStepRegionBase = 50;          // two touch regions per field
 
-// Bottom button strip, shared by both screens.
+// Bottom button strip of the devices screen.
 constexpr int16_t kButtonTop = 198;
 constexpr int16_t kButtonH = 38;
 
@@ -103,6 +124,11 @@ TFT_eSPI tft;
 SPIClass touchSpi(VSPI);
 XPT2046_Touchscreen touch(kTouchCs);
 
+// The graph is drawn off-screen and pushed in one go, so it redraws in full
+// every second - picking up a new FTP too - without flicker. 26 KB.
+TFT_eSprite s_graph(&tft);
+bool s_graphReady = false;
+
 struct Cache {
   int gear = -1;
   int gearCount = -1;
@@ -113,6 +139,7 @@ struct Cache {
   float appliedGrade = 999.0f;
   bool erg = false;
   uint16_t targetPower = 0xFFFF;
+  uint32_t graphSeq = 0;
   bool kickr = false;
   bool di2 = false;
   bool app = false;
@@ -140,9 +167,10 @@ uint32_t s_rowPressAtMs = 0;
 bool s_rowPressFired = false;
 constexpr uint32_t kForgetHoldMs = 1200;
 
-// The devices screen's RIDE button sits exactly on the ride screen's HARDER+
-// region, so without this the finger that changed screens is read as a fresh
-// press on the new one ten milliseconds later.
+// A button on one screen often sits where the next screen has another - the
+// profile and DEBUG buttons open screens whose way back is in the same corner -
+// so without this the finger that changed screens is read as a fresh press on
+// the new one ten milliseconds later.
 bool s_ignoreUntilRelease = false;
 uint32_t s_ignoreSetAtMs = 0;
 uint32_t s_lastTouchLogMs = 0;
@@ -192,12 +220,24 @@ void drawCadenceButton(int state) {
   tft.drawString(text, kRightX + kRightW / 2, kCadenceButtonY + kCadenceButtonH / 2, 2);
 }
 
+// A thick minus, or a plus, drawn rather than typed: Font 4's are 8 px wide,
+// too small for the only thing on a button this size.
+void drawSideButton(int16_t x, bool plus) {
+  tft.fillRoundRect(x, kSideButtonTop, kSideButtonW, kSideButtonH, 6, kDim);
+  const int16_t cx = x + kSideButtonW / 2;
+  const int16_t cy = kSideButtonTop + kSideButtonH / 2;
+  tft.fillRect(cx - 9, cy - 2, 18, 5, TFT_WHITE);
+  if (plus) tft.fillRect(cx - 2, cy - 9, 5, 18, TFT_WHITE);
+}
+
 void drawRideChrome() {
   tft.fillScreen(kBg);
   tft.setTextDatum(TL_DATUM);
   tft.setTextColor(kLabel, kBg);
   tft.drawString("POWER", kRightX, 30, 2);
-  tft.drawString("GRADE", kRightX, 150, 2);
+
+  drawSideButton(kEasierX, false);
+  drawSideButton(kHarderX, true);
 
   tft.fillRoundRect(kDebugButtonX, kDebugButtonY, kDebugButtonW, kDebugButtonH, 4, kDim);
   tft.setTextColor(TFT_WHITE, kDim);
@@ -210,9 +250,42 @@ void drawRideChrome() {
   tft.fillCircle(cx, kChipY + 7, 4, TFT_WHITE);
   tft.fillRoundRect(cx - 8, kChipY + 13, 16, 7, 3, TFT_WHITE);
   tft.fillRect(cx - 8, kChipY + 17, 16, 3, TFT_WHITE);  // square off the bottom edge
+}
 
-  drawButton(4, 150, "- EASIER", kDim, 4);
-  drawButton(166, 150, "HARDER +", kDim, 4);
+constexpr uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
+  return (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+}
+
+// Zwift's six zones and colours, by fraction of FTP.
+uint16_t zoneColour(float fractionOfFtp) {
+  if (fractionOfFtp < 0.60f) return rgb565(0x80, 0x80, 0x80);  // Z1 recovery
+  if (fractionOfFtp < 0.76f) return rgb565(0x33, 0x8C, 0xFF);  // Z2 endurance
+  if (fractionOfFtp < 0.90f) return rgb565(0x59, 0xBF, 0x59);  // Z3 tempo
+  if (fractionOfFtp < 1.05f) return rgb565(0xFF, 0xCC, 0x3F);  // Z4 threshold
+  if (fractionOfFtp < 1.19f) return rgb565(0xFF, 0x66, 0x39);  // Z5 VO2 max
+  return rgb565(0xFF, 0x33, 0x0C);                             // Z6 anaerobic
+}
+
+// Newest second on the right, scrolling left. A dotted line marks FTP, drawn
+// only where no bar covers it.
+void drawPowerGraph() {
+  if (!s_graphReady) return;
+  s_graph.fillSprite(kBg);
+  const float ftp = max(g_cfg.ftpW, 1.0f);
+  const float fullScale = ftp * kGraphTopFtp;
+  for (int age = 0; age < kGraphW; age++) {
+    const uint16_t watts = powerHistory(age);
+    if (watts == 0) continue;
+    int16_t height = (int16_t)lroundf((float)watts / fullScale * (float)kGraphH);
+    height = constrain(height, (int16_t)1, kGraphH);
+    const int16_t x = kGraphW - 1 - age;
+    s_graph.drawFastVLine(x, kGraphH - height, height, zoneColour((float)watts / ftp));
+  }
+  const int16_t ftpY = kGraphH - (int16_t)lroundf((float)kGraphH / kGraphTopFtp);
+  for (int16_t x = 0; x < kGraphW; x += 3) {
+    if (s_graph.readPixel(x, ftpY) == kBg) s_graph.drawPixel(x, ftpY, kDim);
+  }
+  s_graph.pushSprite(kGraphX, kGraphY);
 }
 
 // Nearest real Ultegra 50/34 x 11-34 combination, so a cassette gear reads as
@@ -277,8 +350,8 @@ void updateRide() {
     tft.setTextDatum(TL_DATUM);
     tft.setTextColor(TFT_WHITE, kBg);
     tft.setTextSize(2);
-    tft.setTextPadding(140);
-    tft.drawString(String(g_cfg.gear), 10, 52, 7);
+    tft.setTextPadding(kLeftW);
+    tft.drawString(String(g_cfg.gear), kLeftX, 52, 7);
     tft.setTextSize(1);
   }
 
@@ -289,8 +362,8 @@ void updateRide() {
     formatRatio(buf, sizeof(buf), ratio);
     tft.setTextDatum(TL_DATUM);
     tft.setTextColor(TFT_CYAN, kBg);
-    tft.setTextPadding(150);
-    tft.drawString(buf, 10, 152, 4);
+    tft.setTextPadding(kLeftW);
+    tft.drawString(buf, kLeftX, 152, 4);
   }
 
   if (first || s_cache.power != g_ride.power) {
@@ -326,16 +399,27 @@ void updateRide() {
     s_cache.erg = erg;
     s_cache.targetPower = target;
 
+    // "ERG" moves into the label: "ERG 250W" in Font 4 is wider than the
+    // column.
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextColor(kLabel, kBg);
+    tft.setTextPadding(kRightW);
+    tft.drawString(erg ? "ERG" : "GRADE", kRightX, 150, 2);
+
     char buf[28];
     if (erg) {
-      snprintf(buf, sizeof(buf), "ERG %uW", (unsigned)target);
+      snprintf(buf, sizeof(buf), "%uW", (unsigned)target);
     } else {
       snprintf(buf, sizeof(buf), "%.1f%%", g_ride.appliedGrade);
     }
-    tft.setTextDatum(TL_DATUM);
     tft.setTextColor(TFT_YELLOW, kBg);
-    tft.setTextPadding(kRightW);
     tft.drawString(buf, kRightX, 166, 4);
+  }
+
+  const uint32_t graphSeq = powerHistorySeq();
+  if (first || graphSeq != s_cache.graphSeq) {
+    s_cache.graphSeq = graphSeq;
+    drawPowerGraph();
   }
 
   tft.setTextPadding(0);
@@ -656,6 +740,7 @@ struct ProfileRow {
 const ProfileRow kProfileRows[kProfileFieldCount] = {
     {"Rider weight", "kg", 1},
     {"Bike weight", "kg", 1},
+    {"FTP", "W", 0},
     {"Wheel circ.", "mm", 0},
     {"Rider height", "cm", 0},
 };
@@ -690,15 +775,16 @@ void drawProfileChrome() {
     const int16_t y = profileRowY(row);
     tft.setTextDatum(TL_DATUM);
     tft.setTextColor(kLabel, kBg);
-    tft.drawString(kProfileRows[row].label, 8, y + 9, 2);
-    tft.drawString(kProfileRows[row].unit, kProfileValueRight + 4, y + 9, 2);
+    tft.drawString(kProfileRows[row].label, 8, y + 8, 2);
+    tft.drawString(kProfileRows[row].unit, kProfileValueRight + 4, y + 8, 2);
     drawStepButton(kMinusX, y, "-");
     drawStepButton(kPlusX, y, "+");
   }
 
   tft.setTextDatum(TL_DATUM);
   tft.setTextColor(kDim, kBg);
-  tft.drawString("Saved on the way back. Hold to go faster.", 8, 212, 2);
+  tft.drawString("Saved on the way back. Hold to go faster.", 8,
+                 profileRowY(kProfileFieldCount) + 2, 2);
 
   s_profileShownValid = false;
 }
@@ -714,7 +800,7 @@ void updateProfile() {
     tft.setTextDatum(TR_DATUM);
     tft.setTextColor(TFT_WHITE, kBg);
     tft.setTextPadding(70);
-    tft.drawString(buf, kProfileValueRight, profileRowY(row) + 4, 4);
+    tft.drawString(buf, kProfileValueRight, profileRowY(row) + 3, 4);
   }
   s_profileShownValid = true;
   tft.setTextPadding(0);
@@ -841,6 +927,10 @@ void begin() {
   // Touch stays at rotation 1 so the raw calibration above still applies; the
   // 180-degree flip is done by reversing the ranges in pollTouch().
   touch.setRotation(1);
+
+  s_graph.setColorDepth(16);
+  s_graphReady = s_graph.createSprite(kGraphW, kGraphH) != nullptr;
+  if (!s_graphReady) Serial.println("[ui] no memory for the power graph");
 }
 
 Screen screen() { return s_screen; }
@@ -916,9 +1006,13 @@ Touch pollTouch() {
   int index = -1;
 
   if (s_screen == Screen::Ride) {
+    // The shift buttons are checked before the buttons beside them, whose
+    // tap zones would otherwise reach a few pixels onto them.
+    const bool besideShift =
+        y >= kSideButtonTop - 2 && y <= kSideButtonTop + kSideButtonH + 2;
     // Ahead of the chip row, whose tap zone reaches a couple of pixels into
     // this button.
-    if (x >= kDebugButtonX - 8 && y >= kDebugButtonY - 2 &&
+    if (x >= kDebugButtonX - 8 && x < kHarderX - 2 && y >= kDebugButtonY - 2 &&
         y <= kDebugButtonY + kDebugButtonH + 6) {
       region = 15;
       action = Action::OpenDebug;
@@ -928,6 +1022,12 @@ Touch pollTouch() {
     } else if (y < kChipY + kChipH + 4) {
       region = 10;
       action = Action::OpenDevices;
+    } else if (besideShift && x < kEasierX + kSideButtonW + 4) {
+      region = 12;
+      action = Action::ShiftDown;
+    } else if (besideShift && x >= kHarderX - 4) {
+      region = 13;
+      action = Action::ShiftUp;
     } else if (y >= kCadenceButtonY - 6 && y <= kCadenceButtonY + kCadenceButtonH + 6 &&
                x >= kRightX - 6) {
       region = 11;
@@ -935,9 +1035,6 @@ Touch pollTouch() {
     } else if (y <= kGearCountY + kGearCountH + 6 && x <= kGearCountX + kGearCountW + 6) {
       region = 14;
       action = Action::ToggleGearCount;
-    } else if (y >= kButtonTop - 10) {
-      region = (x < kScreenW / 2) ? 12 : 13;
-      action = (region == 12) ? Action::ShiftDown : Action::ShiftUp;
     }
   } else if (s_screen == Screen::Debug) {
     if (x >= kBackButtonX - 8 && y <= kBackButtonY + kBackButtonH + 8) {

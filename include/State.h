@@ -58,6 +58,7 @@ struct Settings {
   float bikeKg      = kDefaultBikeKg;
   float wheelMm     = kDefaultWheelMm;
   float riderCm     = kDefaultRiderCm;
+  float ftpW        = kDefaultFtpW;
   int   upChannel   = kDefaultUpChannel;
   int   downChannel = kDefaultDownChannel;
   int   gear        = 1;
@@ -101,8 +102,8 @@ void toggleGearCount();
 // Rider profile, edited on the profile screen
 // ---------------------------------------------------------------------------
 
-enum class ProfileField : uint8_t { RiderKg, BikeKg, WheelMm, RiderCm };
-constexpr int kProfileFieldCount = 4;
+enum class ProfileField : uint8_t { RiderKg, BikeKg, FtpW, WheelMm, RiderCm };
+constexpr int kProfileFieldCount = 5;
 
 struct Profile {
   float value[kProfileFieldCount];
@@ -115,6 +116,22 @@ void stepProfile(Profile& profile, ProfileField field, int steps);
 
 // Copies the profile into the settings; true if anything changed.
 bool applyProfile(const Profile& profile);
+
+// ---------------------------------------------------------------------------
+// Power history, for the ride screen's graph
+// ---------------------------------------------------------------------------
+
+// One entry per second, each the 3 s moving average of power at that moment.
+constexpr int kPowerHistoryLen = 316;
+
+// Call from the loop; it keeps its own time.
+void samplePowerHistory();
+
+// Watts `secondsAgo` entries back (0 = newest); 0 beyond what is recorded.
+uint16_t powerHistory(int secondsAgo);
+
+// Goes up by one per new entry, so a reader can tell when to redraw.
+uint32_t powerHistorySeq();
 
 // ---------------------------------------------------------------------------
 // Cadence

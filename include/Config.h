@@ -162,6 +162,7 @@ static constexpr float kGradeClampHigh   = 20.0f;
 static constexpr float kDefaultRiderKg = 89.0f;
 static constexpr float kDefaultBikeKg  = 8.0f;
 static constexpr float kDefaultRiderCm = 181.0f;
+static constexpr float kDefaultFtpW = 220.0f;
 
 // Fallbacks until the app sends its own simulation parameters.
 static constexpr float kDefaultCrr = 0.00415f;

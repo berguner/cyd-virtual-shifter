@@ -177,12 +177,13 @@ pairing list — if you pair that directly, you get no shifting.
 
 ```
 [KICKR] [ DI2] [ CAD] [ APP] [(o)]  <- tap to reopen the picker | profile
-[  16 GEARS  ]       POWER [DEBUG]  <- switch 16 / 32 | open the debug screen
-  9                  243
-                     [ CAD: SENSOR ]  <- tap to switch source
- 34x14 2.43          88
-                     GRADE
-[ - EASIER ] [ HARDER + ]   3.0%
+ _  [16 GEARS]      POWER [DEBUG]  _   <- switch 16 / 32 | open the debug screen
+| |   9             243           | |
+|-|                 [CAD: SENSOR] |+|  <- shift easier | harder; tap CAD to switch source
+| | 34x14 2.43      88            | |
+|_|                 GRADE         |_|
+                    3.0%
+ ..::|||||::..::|||||||||::..          <- power, last five minutes
 ```
 
 Pair your heart rate strap with Zwift directly; it is not relayed here.
@@ -198,19 +199,27 @@ raw combinations by ratio instead (what this used to do) makes the front
 zig-zag repeatedly through the rings' overlap, which feels wrong even though
 each ratio is real. 32 has no real cassette to copy, so it spreads 0.50 to
 6.00 uniformly instead: every shift adds 0.177 to the ratio, and the range is
-wider than any real 2x at both ends. Switching lands on the gear nearest the ratio you are in, so the
-resistance does not jump under you mid-ride.
+wider than any real 2x at both ends. Switching lands on the gear nearest the
+ratio you are in, so the resistance does not jump under you mid-ride.
 
 The top of the 32-gear range needs a trainer wheel size of 6.4 m, close to
 the 6553.5 mm the Wahoo command can carry; with a wheel circumference above
 2184 mm on the profile screen, the top gears stop at that ceiling.
 
-The two bottom buttons are a manual backup for the Di2 input; hold for
-auto-repeat.
+The two side buttons, `-` easier and `+` harder, are a manual backup for the
+Di2 input; hold for auto-repeat.
+
+**Power graph.** Along the bottom, one column per second for the last five
+minutes, newest on the right. Each column is the 3 s average power at that
+second, its height in proportion to power - the top edge is 150 % of FTP - and
+its colour Zwift's zone: grey below 60 % of FTP, then blue, green from 76 %,
+yellow from 90 %, orange from 105 % and red from 119 %. A dotted line marks
+FTP. It keeps recording while another screen is open.
 
 **Profile.** The head-and-shoulders button in the top-right corner opens rider
-weight, bike weight, wheel circumference and rider height, each with `-`/`+`
-(hold to repeat; after a couple of seconds a hold moves ten steps at a time).
+weight, bike weight, FTP, wheel circumference and rider height, each with
+`-`/`+` (hold to repeat; after a couple of seconds a hold moves ten steps at a
+time).
 Nothing changes until `< RIDE`: the values are then stored on the device and
 sent to the trainer - at once in sim, or when ERG ends, since the sim-mode
 write that carries the weight would end ERG. Height is stored but not used
@@ -243,6 +252,7 @@ Everything lives at the bottom of `include/Config.h`:
 | `kDefaultWheelMm` | 2146 | 700×30c. Editable on the profile screen. |
 | `kDefaultRiderKg` / `kDefaultBikeKg` | 89 / 8 | Sent to the trainer's sim mode. Editable on the profile screen. |
 | `kDefaultRiderCm` | 181 | Editable on the profile screen; not used yet. |
+| `kDefaultFtpW` | 220 | Sets the power graph's zones and scale. Editable on the profile screen. |
 | `kDefaultUpChannel` / `kDefaultDownChannel` | 2 / 1 | Swap if the buttons feel backwards. |
 
 Values are cached in NVS on first boot, so **after changing a default, erase
