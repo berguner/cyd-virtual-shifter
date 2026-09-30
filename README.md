@@ -1,298 +1,203 @@
 # CYD Virtual Shifter
 
-Virtual shifting for a **Wahoo KICKR v5 (2020)**, driven by **Shimano 12-speed
-Di2 hood buttons**, running on a **Cheap Yellow Display** (ESP32-2432S028R,
-two-USB-port / ST7789 variant).
+**Virtual shifting for the Wahoo KICKR v5, using your Shimano Di2 hood buttons,
+on a ~€15 ESP32 touchscreen.** No phone app to keep running and no Zwift Click:
+the Cheap Yellow Display sits between the trainer and Zwift or MyWhoosh, turns
+your Di2 button presses into virtual gears, and shows your ride on its own
+screen.
+
+![The ride screen: 32-gear mode in gear 13, 165 W at 83 rpm, an ERG target of 167 W, and the last five minutes of power coloured by zone](cyd-vs-main.png)
+
+## Why
+
+The KICKR v5 (2020) never got virtual shifting. Wahoo ruled out Zwift's
+virtual shifting for the v4/v5, and the v5 doesn't speak FTMS either, so no
+training app can shift gears on it. The only way is to sit between the trainer
+and the app. This firmware does that on a board that costs less than a
+cassette, with a screen you can mount on the bars.
 
 ```
-  KICKR v5  <--BLE--  CYD  --BLE-->  Zwift / MyWhoosh
-   (Wahoo proprietary) |  (FTMS + Cycling Power)
-                       |
-          +------------+------------+
-          |                         |
-  Di2 R8150 derailleur      cadence sensor
-    (D-Fly channels)        (speed + cadence)
+  KICKR v5  <--BLE-->  CYD  <--BLE-->  Zwift / MyWhoosh
+                        ^                (sees an FTMS trainer
+          +-------------+----------+      called "CYDShift")
+          |                        |
+   Di2 hood buttons         BLE cadence sensor
+    (D-Fly channels)           (optional)
 ```
 
-## Why a bridge and not a plugin
+The chain stays in one gear on the real bike (34/17 by default). A virtual
+gear is a gear ratio, applied by telling the trainer's own sim physics that the
+wheel is bigger or smaller than it is. At the same cadence a bigger virtual
+wheel means a faster virtual road, which is exactly what a bigger gear does.
+The app's gradient goes to the trainer untouched, so hills still feel like
+hills in every gear.
 
-The KICKR v5 is a dead end for native virtual shifting:
+## Features
 
-* Wahoo ruled out Zwift Virtual Shifting for the v4/v5 — the hardware can't run
-  the protocol, and there will be no firmware update.
-* The v5 doesn't implement FTMS either. It speaks the standard Cycling Power
-  Service for telemetry plus Wahoo's own control point for resistance.
+- **Shift with the Di2 hood buttons** you already have, over Shimano's D-Fly
+  channels. A double-press shifts two gears. The big `−`/`+` buttons down the
+  screen edges do the same, and repeat when held.
+- **Two gear sets:**
+  - **16 gears** walk a real Shimano Ultegra 50/34 × 11-34 12-speed: all nine
+    small-ring cogs, one front shift, then the big ring. That's the same single
+    crossover Di2 synchronized shift uses, rather than a zig-zag through
+    overlapping ratios.
+  - **32 gears** spread ratios 0.50 to 6.00 in equal steps, wider than any
+    real 2x at both ends.
+  - Switching between them lands on the nearest ratio, so the resistance
+    doesn't jump.
+- **Works with any app that controls an FTMS trainer.** It's tested with
+  **Zwift** and **MyWhoosh**, in free riding (sim) and ERG workouts. The
+  shifting is the same in every app, because the app never knows about gears.
+- **ERG passes straight through.** The trainer holds the workout's target and
+  the gears step aside. The firmware also handles two things that break ERG
+  otherwise:
+  - MyWhoosh's way of switching ERG off and on;
+  - the KICKR stalling if it's put into ERG while the flywheel is stopped.
+- **Cadence from a BLE sensor**, if you have one. The sensor's cadence goes to
+  the app too, not just the screen. If the sensor drops out mid-ride, the
+  trainer's own cadence is used instead, and the screen shows that it happened.
+- **Real numbers.** Power is the trainer's own measurement, and cadence comes
+  from the trainer or your sensor. Nothing is estimated or faked.
+- **A live power graph** of the last five minutes in Zwift's zone colours,
+  scaled to your FTP.
+- **Rider profile on the device:** rider and bike weight, FTP, wheel
+  circumference and height, set on the touchscreen and remembered across power
+  cycles.
+- **A debug screen** that shows both Bluetooth conversations live, for when
+  something doesn't behave.
 
-So nothing in Zwift or MyWhoosh can shift gears on it. The only way is to sit
-between the trainer and the app — which is exactly what QZ and SHIFTR do. This
-firmware does the same thing on a £12 display board.
+## The ride screen
 
-## How a gear works here
-
-A gear is a **virtual gear ratio**, applied through the trainer's wheel size.
-The KICKR's sim mode turns flywheel speed into road speed with its configured
-wheel circumference, then resists as that speed, grade, weight, rolling and air
-resistance demand. Tell it the wheel is bigger and, at the same cadence, it
-thinks you are going faster — which is exactly what a bigger gear does:
-
-```
-wheel size = 2146 mm × virtual ratio / real ratio (34/17)
-```
-
-The chain stays on **34/17**. In 16-gear mode virtual ratios span a Shimano
-Ultegra 50/34 × 11-34 12-speed, **34/34 (1.00) to 50/11 (4.55)**; in 32-gear
-mode **0.50 to 6.00** — see [Screen](#screen) below for how the steps in
-between are chosen. The app's grade goes to the trainer untouched; the trainer
-does all the physics.
-
-Rough feel on the flat at 77 rpm, 97 kg: 34/34 ≈ 10 km/h, 20 W; 34/17 ≈
-20 km/h, 65 W; 50/13 ≈ 38 km/h, 340 W.
-
-The wheel size persists on the KICKR between sessions, and a wrong one left by
-another app silently scales every watt (this is what made the trainer feel
-three times too easy, even paired directly). It is set on every connect.
-
-Reported power and cadence are the trainer's own numbers, relayed untouched.
-Nothing about your ride data is faked.
-
-Speed is reported but nothing reads it: Zwift and MyWhoosh model speed from
-power, rider weight and gradient. It is carried because the Indoor Bike Data
-payload is *positional* — omitting the field via the More Data flag is legal
-FTMS, but MyWhoosh then read cadence as speed and power as cadence, and showed
-zero watts. The value comes from the trainer's own wheel-revolution counters.
-
-## Cadence source
-
-The KICKR v5 infers cadence from flywheel speed, which lags and drifts. If a
-BLE speed/cadence sensor is in range it is picked up automatically, and the
-**CAD:** button on the right of the screen switches between the two.
-
-The choice follows through to the app, not just the display: when the sensor is
-selected, its crank counters are spliced into the Cycling Power packet on the
-way past. Both services count crank events in 1/1024 s, so the numbers carry
-over untouched and Zwift derives cadence exactly as it would from the sensor
-paired directly.
-
-Cadence counts as stopped once no revolution has arrived for two revolutions'
-worth of time at the last cadence (1.3 s minimum, 2 s maximum — about 1.4 s at
-85 rpm). The display, the FTMS cadence and the Cycling Power counters all use
-that one rule. For the counters, trainer and sensor both keep repeating their
-last values when you stop, which apps read as "no news" and hold the old
-cadence for several seconds; so the event time sent to the app is moved on
-without a new revolution, which reads as zero straight away.
-
-If the sensor is selected but goes quiet for 4 s while the trainer still sees
-pedalling, cadence falls back to the trainer rather than dropping out
-mid-ride, and the button turns amber (`CAD: NO SENSOR`) so the reason is
-visible. A sensor going quiet because the cranks stopped is not a dropout.
-
-## ERG
-
-In ERG mode the gears do nothing — the workout owns the resistance.
-
-The trainer only goes into ERG once you are pedalling with the flywheel
-above 8 km/h, and drops back to sim after 4 s without cadence. A KICKR v5 put
-into ERG with its flywheel stopped went on reporting zero speed and power
-every time it was in ERG afterwards, braking as if you had stalled, until it
-was power-cycled. If ERG ever feels seized with power reading 0 while you
-pedal, power-cycle the KICKR.
-
-After re-establishing sim mode the trainer's acknowledgement is awaited and
-the command resent if none comes — a write can go through without the
-trainer taking it, and one that did was followed by exactly that stall.
-
-MyWhoosh switches ERG off and back on with the same sim-parameters write, and
-follows the switch-on with a target only if the target changed since it last
-sent one — so switching ERG back on within a workout step used to do nothing.
-A sim-parameters write that ends ERG therefore only pauses it; an identical
-one at least 3 s later resumes it at the kept target. Zwift re-sends its
-target every 20 s and streams grade with every change, so this never
-triggers there.
-
-## One-time setup
-
-### 1. E-TUBE
-
-In **E-TUBE PROJECT Cycling**, assign the two hood-top buttons to **D-Fly
-channels**. Nothing is broadcast over BLE otherwise.
-
-Default mapping in `include/Config.h`:
-
-| D-Fly channel | Action |
+| On screen | What it tells you |
 |---|---|
-| 1 | shift down (easier) |
-| 2 | shift up (harder) |
+| **KICKR · DI2 · CAD · APP** | The four links: trainer, shifter, cadence sensor, training app. Green when connected, red when not. Tap any of them to open the device picker. |
+| Person icon (top right) | Opens the rider profile. |
+| **16 / 32 GEARS** | The gear set. Tap to switch. |
+| Big number | The current gear. |
+| Cyan figure | The virtual gear ratio. In 16-gear mode it's shown with the nearest real chainring × cog, e.g. `34x14 2.43`. |
+| **POWER** | Instant power from the trainer, in watts. |
+| **DEBUG** | Opens the debug screen. |
+| **CAD: SENSOR / TRAINER** | Where cadence comes from. Tap to switch. It turns amber (`NO SENSOR`) if the chosen sensor went quiet and the trainer's cadence is being used instead. The number underneath is your cadence in rpm. |
+| **GRADE** or **ERG** | In sim, the gradient the trainer is riding. In an ERG workout, the target wattage. |
+| `−` / `+` | Easier / harder. The same as the Di2 buttons. |
+| Power graph | One column per second for the last five minutes, newest on the right. Each is the 3-second average power, as tall as it is strong (the top edge is 150 % of FTP), in Zwift's zone colours: grey below 60 % of FTP, then blue, green from 76 %, yellow from 90 %, orange from 105 % and red from 119 %. The dotted line is FTP. |
 
-A double-press shifts two gears. Long press is ignored.
+The other screens:
 
-### 2. Build and flash
+- **Device picker.** It lists what's advertising nearby, each tagged with its
+  likely role. Tap a row to connect it, and hold a row to forget it. Chosen
+  devices reconnect by themselves on every boot.
+- **Profile.** Each value has `−`/`+`; hold for faster steps. Changes are saved
+  and sent to the trainer when you go back to the ride screen.
+- **Debug.** It shows every field of the trainer's power packets, every command
+  the app sends, the last value sent with each trainer command and whether the
+  trainer accepted it, and what goes back to the app.
 
-```sh
-~/.platformio/penv/bin/pio run -e cyd2usb
-~/.platformio/penv/bin/pio run -e cyd2usb -t upload --upload-port /dev/cu.usbserial-XXXX
-```
+## What you need
 
-Flash over the **micro-USB** port — the USB-C port has no CC resistors.
-`upload_speed` is pinned to 115200 on purpose; faster rates corrupt the stub.
+- **A Cheap Yellow Display, ESP32-2432S028R.** Get the variant with **two USB
+  ports** (micro-USB and USB-C) and the ST7789 panel. The original single-port
+  version has a different display controller and needs its own display
+  settings, which aren't included here.
+- **A Wahoo KICKR v5 (2020).** This is the only trainer it has been tested
+  with. It talks Wahoo's own control protocol, so other trainers aren't
+  supported.
+- **Shimano Di2 with D-Fly** (tested with 12-speed R8150), set up in the
+  E-TUBE PROJECT app. You can also ride without Di2 and use the on-screen
+  buttons.
+- *Optional:* a BLE speed/cadence sensor.
+- A USB power supply, and a case or bar mount for the board.
 
-### 3. Pick your devices
+## Setup
 
-First boot lands on the device picker. It scans continuously and lists whatever
-it finds, tagged with a guess at the role:
+1. **E-TUBE.** In E-TUBE PROJECT Cycling, assign the two hood-top buttons to
+   **D-Fly channels**. Nothing is broadcast over Bluetooth otherwise. Channel 1
+   shifts easier and channel 2 harder; swap them in `include/Config.h` if you'd
+   rather have them the other way round.
+2. **Flash.** Install [PlatformIO](https://platformio.org) (the CLI or the VS
+   Code extension), clone this repo, connect the CYD by its **micro-USB** port
+   (the USB-C port lacks the resistors some chargers need) and run:
+   ```sh
+   pio run -e cyd2usb -t upload
+   ```
+   The upload speed is deliberately pinned to 115200. Faster rates corrupt the
+   transfer on this board.
+3. **Pick your devices.** On first boot the CYD opens the device picker. Tap
+   your KICKR, your Di2 (press a shift button to wake it if it isn't listed),
+   and optionally your cadence sensor, then **RIDE >**.
+4. **Pair the app.** In Zwift or MyWhoosh, pair **CYDShift** as your power
+   source and controllable trainer. Don't pair the KICKR itself, or you get no
+   shifting. Pair a heart-rate strap with the app directly, because it isn't
+   relayed. If the app has its own virtual shifting, turn it off. It isn't
+   relayed to the trainer, and you don't need it: the CYD does the shifting.
+5. **Set your profile.** Tap the person icon (top right) and set your weight,
+   bike weight, FTP and wheel circumference. The weights feed the trainer's sim physics, and FTP sets the
+   power graph's zones.
 
-```
-TAP A DEVICE TO CONNECT                    7 found
-[TRAIN] KICKR 1E2F                             -54
-[SHIFT] RDR8150-4A21                           -61
-[ CAD ] COOSPO BK467                           -68
-[  HR ] TICKR 9C21                             -63
-[  ?  ] 4c:1d:96:aa:bb:cc                      -88
-[ UP ] [ DOWN ] [      RIDE >      ]
-```
+## How it compares
 
-Tap a row to connect it. The role tag is only a guess from the advertisement —
-what actually decides is the service the device exposes once connected, so a
-row tagged `?` is still worth tapping. That is the fallback if your sensor
-advertises nothing recognisable.
+Several good projects bring virtual shifting to trainers that don't have it.
+They make different trade-offs:
 
-Heart rate straps are tagged `HR` and deliberately not connectable: probing one
-would open a real link and take its single connection slot away from Zwift for
-no benefit. Pair the strap with the training app directly.
+| | **CYD Virtual Shifter** | [BikeControl](https://github.com/OpenBikeControl/bikecontrol) | [QZ (qdomyos-zwift)](https://github.com/cagnulein/qdomyos-zwift) | [SHIFTR](https://github.com/JuergenLeber/SHIFTR) | [Kickr-Virtual-Shifting](https://github.com/Berg0162/Kickr-Virtual-Shifting) |
+|---|---|---|---|---|---|
+| What it is | ESP32 firmware with its own touchscreen | App for Android, iOS, macOS, Windows | App for Android and iOS | ESP32 firmware (WT32-ETH01) | ESP32 Arduino library with examples |
+| Needs a phone or computer running it | No | Yes | Yes | No | No |
+| Trainers | Wahoo KICKR v5 | Smart trainers connected to it directly, or none - it can also drive the app's own shifting | A very wide range of bikes, treadmills, rowers and ellipticals | FE-C over BLE (Tacx NEO 2T, Vortex) | Legacy Wahoo KICKRs without virtual-shifting firmware |
+| Shift with | Di2 hood buttons, on-screen buttons | Zwift Click/Play/Ride, Di2, SRAM AXS, gamepads and more | Several controllers, including Zwift's | Zwift Click / Play | Zwift Click |
+| Apps | Any FTMS app; tested with Zwift and MyWhoosh | Most trainer apps | Most trainer apps | Zwift with virtual shifting; MyWhoosh without | Zwift, Rouvy |
+| Where gears live | On the CYD; the app sees a normal trainer | In BikeControl, or in the app it drives | In QZ, which can follow Zwift's gear | Zwift's own virtual shifting | Zwift's own virtual shifting |
 
-Picked devices turn green and are remembered, so later boots go straight to the
-ride screen and reconnect on their own. **Tap a remembered row again to forget
-it.** The picker is always one tap on the ride screen's header away.
+In short:
 
-### 4. Pair
+- **BikeControl or QZ** are the way to go if you'd rather not build hardware,
+  have a tablet running anyway, or need to cover lots of controllers, trainers
+  and apps. QZ in particular supports far more equipment than anything else
+  here.
+- **SHIFTR** fits a Tacx or other FE-C trainer if you want Zwift's native
+  virtual shifting, plus an Ethernet connection to Zwift through Wahoo's
+  Direct Connect.
+- **Kickr-Virtual-Shifting** gives an older KICKR Zwift's own virtual-shifting
+  experience, gear display and all, using a Zwift Click. It's a library to
+  build on rather than a finished device.
+- **This project** suits a KICKR v5 and Di2 rider who wants dedicated
+  hardware: a screen on the bars that shifts the same way in every app, with
+  nothing else to launch.
 
-In Zwift or MyWhoosh pair **`CYDShift`**, not the KICKR.
+The flip side of "the app sees a normal trainer" is that the app doesn't know
+your gear. In-app virtual shifting, such as Zwift's or MyWhoosh's, isn't
+relayed to the trainer, so switch it off in the app. The gear lives on the
+CYD's screen instead.
 
-The Di2 derailleur only advertises when awake, so press a shift button if it
-does not show up in the picker.
+## Known limitations
 
-Pair it as both *Power Source* and *Controllable*. Ignore the real KICKR in the
-pairing list — if you pair that directly, you get no shifting.
+- **Trainer:** only the KICKR v5 has been tested, and it has to stay in the
+  real gear set in `include/Config.h` (34/17 by default).
+- **One app at a time**, and heart rate isn't relayed.
+- **ERG:** the gears do nothing in ERG, by design.
+- **If the KICKR stalls:** if power ever reads 0 W while you're clearly
+  pedalling in ERG, power-cycle the KICKR. The firmware avoids the known cause,
+  but that's what clears it.
+- **Wheel size ceiling:** the top of the 32-gear range needs almost the largest
+  wheel size the trainer accepts. With a wheel circumference above about
+  2184 mm, the top few gears stop at that ceiling.
 
-## Screen
+## More detail
 
-```
-[KICKR] [ DI2] [ CAD] [ APP] [(o)]  <- tap to reopen the picker | profile
- _  [16 GEARS]      POWER [DEBUG]  _   <- switch 16 / 32 | open the debug screen
-| |   9             243           | |
-|-|                 [CAD: SENSOR] |+|  <- shift easier | harder; tap CAD to switch source
-| | 34x14 2.43      88            | |
-|_|                 GRADE         |_|
-                    3.0%
- ..::|||||::..::|||||||||::..          <- power, last five minutes
-```
+[docs/TECHNICAL.md](docs/TECHNICAL.md) covers how gears, cadence and ERG work
+underneath, the settings you can tune, the Wahoo and Shimano protocol details,
+and reading the serial log.
 
-Pair your heart rate strap with Zwift directly; it is not relayed here.
+## Credits
 
-`34x14 2.43` is the virtual ratio and the nearest real Ultegra combination;
-in 32-gear mode only the ratio is shown.
+The protocol knowledge this relies on comes from the projects compared above,
+especially [qdomyos-zwift](https://github.com/cagnulein/qdomyos-zwift) and
+[SHIFTR](https://github.com/JuergenLeber/SHIFTR). It's built on
+[NimBLE-Arduino](https://github.com/h2zero/NimBLE-Arduino),
+[TFT_eSPI](https://github.com/Bodmer/TFT_eSPI) and
+[XPT2046_Touchscreen](https://github.com/PaulStoffregen/XPT2046_Touchscreen).
 
-**16 or 32 gears.** 16 gears walk a real Ultegra 50/34 x 11-34 12-speed
-cassette: every small-ring cog ascending, then the front crosses over once
-and every remaining big-ring cog ascending - the same single transition point
-(34/14 -> 50/19) E-TUBE's own synchronized-shift table uses. Sorting all 24
-raw combinations by ratio instead (what this used to do) makes the front
-zig-zag repeatedly through the rings' overlap, which feels wrong even though
-each ratio is real. 32 has no real cassette to copy, so it spreads 0.50 to
-6.00 uniformly instead: every shift adds 0.177 to the ratio, and the range is
-wider than any real 2x at both ends. Switching lands on the gear nearest the
-ratio you are in, so the resistance does not jump under you mid-ride.
-
-The top of the 32-gear range needs a trainer wheel size of 6.4 m, close to
-the 6553.5 mm the Wahoo command can carry; with a wheel circumference above
-2184 mm on the profile screen, the top gears stop at that ceiling.
-
-The two side buttons, `-` easier and `+` harder, are a manual backup for the
-Di2 input; hold for auto-repeat.
-
-**Power graph.** Along the bottom, one column per second for the last five
-minutes, newest on the right. Each column is the 3 s average power at that
-second, its height in proportion to power - the top edge is 150 % of FTP - and
-its colour Zwift's zone: grey below 60 % of FTP, then blue, green from 76 %,
-yellow from 90 %, orange from 105 % and red from 119 %. A dotted line marks
-FTP. It keeps recording while another screen is open.
-
-**Profile.** The head-and-shoulders button in the top-right corner opens rider
-weight, bike weight, FTP, wheel circumference and rider height, each with
-`-`/`+` (hold to repeat; after a couple of seconds a hold moves ten steps at a
-time).
-Nothing changes until `< RIDE`: the values are then stored on the device and
-sent to the trainer - at once in sim, or when ERG ends, since the sim-mode
-write that carries the weight would end ERG. Height is stored but not used
-yet: the apps send their own wind-resistance coefficient.
-
-**Debug screen.** `DEBUG` shows both data streams live, refreshed four times a
-second; `< RIDE` goes back, and the Di2 buttons keep shifting meanwhile.
-
-| Section | Shows |
-|---|---|
-| KICKR > CYD | Each Cycling Power field as received — power, accumulated torque, wheel and crank counters with their event times — plus the flags, packet rate and age, and the speed and cadence derived from them. |
-| APP > CYD | The latest FTMS control-point write in hex, the sim parameters (grade, crr, cw, wind), ERG state and target, and a count of each command the app has sent since it connected. |
-| CYD > KICKR | Trainer mode, the last value sent with each Wahoo command (grade, wheel size, ERG watts, sim-mode kg/crr/cw), and the status the trainer answered each with — `01` accepted, red anything else, `--` no answer yet. |
-| CYD > APP | Power, cadence and its source, and speed as sent in Indoor Bike Data. |
-
-If ERG keeps dropping out, check the counts: an app that sends sim
-parameters in between its target-power writes flips the trainer out of ERG
-each time.
-
-## Tuning
-
-Everything lives at the bottom of `include/Config.h`:
-
-| Setting | Default | Notes |
-|---|---|---|
-| `kGearCountLow` / `kGearCountHigh` | 16 / 32 | The two counts the on-screen button switches between. |
-| `kRealChainring` / `kRealCog` | 34 / 17 | Where the chain actually sits. Change if you move it. |
-| `kSmoothMinRatio` / `kSmoothMaxRatio` | 0.5 / 6.0 | Bottom and top of the 32-gear mode. |
-| `kRealGearRatios` | 16 real 50/34 x 11-34 combos, single crossover | The 16-gear ladder, in order. Edit if your cassette or crossover point differs. |
-| `kDefaultWheelMm` | 2146 | 700×30c. Editable on the profile screen. |
-| `kDefaultRiderKg` / `kDefaultBikeKg` | 89 / 8 | Sent to the trainer's sim mode. Editable on the profile screen. |
-| `kDefaultRiderCm` | 181 | Editable on the profile screen; not used yet. |
-| `kDefaultFtpW` | 220 | Sets the power graph's zones and scale. Editable on the profile screen. |
-| `kDefaultUpChannel` / `kDefaultDownChannel` | 2 / 1 | Swap if the buttons feel backwards. |
-
-Values are cached in NVS on first boot, so **after changing a default, erase
-flash** (`pio run -t erase`) or the old value wins.
-
-## Protocol notes
-
-Reverse-engineering credit to the projects in the sibling directories.
-
-**Wahoo control point** — `a026e005-0a7d-4ab3-97fa-f1500f9feb8b`, inside the
-standard Cycling Power Service:
-
-| Opcode | Command | Payload |
-|---|---|---|
-| `0x20` | unlock | `EE FC` — required before anything else works |
-| `0x40` | resistance mode | `u16 LE`, `(1−fraction) × 16383` |
-| `0x42` | ERG mode | `u16 LE` watts |
-| `0x43` | sim mode | `u16 LE` kg×100, crr×1000, cw×1000 |
-| `0x46` | sim grade | `u16 LE`, `(fraction+1) × 65535/2` |
-| `0x48` | wheel circumference | `u16 LE` mm×10 — persists on the trainer |
-
-Every command is answered on the same characteristic with
-`01 <opcode> <status>`; status `01` is success. The v5 answers unlock with
-`02` and works regardless.
-
-**Shimano D-Fly over BLE** — service `000018ef-5348-494d-414e-4f5f424c4500`
-(the suffix is ASCII `SHIMANO_BLE`), alternative `000018ff-…`, characteristic
-`00002ac2-…` by indication. Payload is a header byte followed by one byte per
-channel: `0x10` short press, `0x20` long, `0x40` double.
-
-## Not yet verified on hardware
-
-This compiles clean but has not been ridden. Expect to shake out:
-
-* **Touch calibration.** Tapping a shift button prints `[touch] raw x,y` to
-  serial; adjust `kTouchMinX`/`kTouchMaxX`/… in `src/Ui.cpp` if the buttons
-  feel offset.
-* **Di2 bonding.** If the derailleur refuses the connection, it may want a
-  bonded pairing rather than the open connect used here.
-* **Sensor discovery.** Role tags come from the advertisement, so a device that
-  advertises nothing recognisable shows as `?`. Tapping it still works — the
-  role is settled by probing the services. The serial log prints what each
-  probe found.
+*Not affiliated with or endorsed by Wahoo, Shimano, Zwift or MyWhoosh. Product
+names are trademarks of their owners and are used only to say what this works
+with. Use at your own risk.*
