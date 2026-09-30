@@ -1,10 +1,10 @@
 # CYD Virtual Shifter
 
-**Virtual shifting for the Wahoo KICKR v5, using your Shimano Di2 hood buttons,
-on a ~€15 ESP32 touchscreen.** No phone app to keep running and no Zwift Click:
-the Cheap Yellow Display sits between the trainer and Zwift or MyWhoosh, turns
-your Di2 button presses into virtual gears, and shows your ride on its own
-screen.
+**Virtual shifting for the Wahoo KICKR v5, using your Shimano Di2 hood buttons
+or the touchscreen, on a ~€15 ESP32 board.** No phone app to keep running and
+no Zwift Click: the Cheap Yellow Display sits between the trainer and Zwift or
+MyWhoosh, turns button presses into virtual gears, and shows your ride on its
+own screen.
 
 ![The ride screen: 32-gear mode in gear 13, 165 W at 83 rpm, an ERG target of 167 W, and the last five minutes of power coloured by zone](cyd-vs-main.png)
 
@@ -22,7 +22,7 @@ cassette, with a screen you can mount on the bars.
           +-------------+----------+      called "CYDShift")
           |                        |
    Di2 hood buttons         BLE cadence sensor
-    (D-Fly channels)           (optional)
+    (D-Fly, optional)          (optional)
 ```
 
 The chain stays in one gear on the real bike (34/17 by default). A virtual
@@ -35,8 +35,8 @@ hills in every gear.
 ## Features
 
 - **Shift with the Di2 hood buttons** you already have, over Shimano's D-Fly
-  channels. A double-press shifts two gears. The big `−`/`+` buttons down the
-  screen edges do the same, and repeat when held.
+  channels; a double-press shifts two gears. **No Di2? No problem:** the big
+  `−`/`+` buttons down the screen edges do the same, and repeat when held.
 - **Two gear sets:**
   - **16 gears** walk a real Shimano Ultegra 50/34 × 11-34 12-speed: all nine
     small-ring cogs, one front shift, then the big ring. That's the same single
@@ -103,16 +103,16 @@ The other screens:
 - **A Wahoo KICKR v5 (2020).** This is the only trainer it has been tested
   with. It talks Wahoo's own control protocol, so other trainers aren't
   supported.
-- **Shimano Di2 with D-Fly** (tested with 12-speed R8150), set up in the
-  E-TUBE PROJECT app. You can also ride without Di2 and use the on-screen
-  buttons.
+- *Optional:* **Shimano Di2 with D-Fly** (tested with 12-speed R8150), set up
+  in the E-TUBE PROJECT app. Without it you shift with the on-screen buttons,
+  so mount the CYD within reach.
 - *Optional:* a BLE speed/cadence sensor.
 - A USB power supply, and a case or bar mount for the board.
 
 ## Setup
 
-1. **E-TUBE.** In E-TUBE PROJECT Cycling, assign the two hood-top buttons to
-   **D-Fly channels**. Nothing is broadcast over Bluetooth otherwise. Channel 1
+1. **E-TUBE** (Di2 only). In E-TUBE PROJECT Cycling, assign the two hood-top
+   buttons to **D-Fly channels**. Nothing is broadcast over Bluetooth otherwise. Channel 1
    shifts easier and channel 2 harder; swap them in `include/Config.h` if you'd
    rather have them the other way round.
 2. **Flash.** Install [PlatformIO](https://platformio.org) (the CLI or the VS
@@ -124,8 +124,9 @@ The other screens:
    The upload speed is deliberately pinned to 115200. Faster rates corrupt the
    transfer on this board.
 3. **Pick your devices.** On first boot the CYD opens the device picker. Tap
-   your KICKR, your Di2 (press a shift button to wake it if it isn't listed),
-   and optionally your cadence sensor, then **RIDE >**.
+   your KICKR, then optionally your Di2 (press a shift button to wake it if it
+   isn't listed) and your cadence sensor, then **RIDE >**. Without a Di2 the
+   DI2 chip just stays red.
 4. **Pair the app.** In Zwift or MyWhoosh, pair **CYDShift** as your power
    source and controllable trainer. Don't pair the KICKR itself, or you get no
    shifting. Pair a heart-rate strap with the app directly, because it isn't
@@ -161,9 +162,9 @@ In short:
 - **Kickr-Virtual-Shifting** gives an older KICKR Zwift's own virtual-shifting
   experience, gear display and all, using a Zwift Click. It's a library to
   build on rather than a finished device.
-- **This project** suits a KICKR v5 and Di2 rider who wants dedicated
-  hardware: a screen on the bars that shifts the same way in every app, with
-  nothing else to launch.
+- **This project** suits a KICKR v5 owner, with Di2 or without, who wants
+  dedicated hardware: a screen on the bars that shifts the same way in every
+  app, with nothing else to launch.
 
 The flip side of "the app sees a normal trainer" is that the app doesn't know
 your gear. In-app virtual shifting, such as Zwift's or MyWhoosh's, isn't
